@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PID Simulator</title>
+</head>
+<body>
+    <h1>Enter PID Parameters</h1>
+    <form method="post">
+        Kp: <input type="text" name="Kp"><br>
+        Ki: <input type="text" name="Ki"><br>
+        Kd: <input type="text" name="Kd"><br>
+        <input type="submit" value="Simulate">
+    </form>
+
+    {% if result %}
+        <h2>Simulation Results</h2>
+        <p>Final PV: {{ result.pv[-1] }}</p>
+        <p>Final SP: {{ result.sp[-1] }}</p>
+        <p>Final CV: {{ result.cv[-1] }}</p>
+    {% endif %}
+</body>
+</html>

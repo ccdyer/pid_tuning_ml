@@ -35,19 +35,24 @@ for i, x in enumerate(array):
         if pv >= pv_response_threshold and dead_time_final == -1:
             dead_time_final = t
             dead_time = dead_time_final - step_change_time
+#     if dead_time_final != -1:
+#         window = array[i:i+window_size]
+#         if np.all(np.abs(window-window-1) < tolerance_pct * abs(window[-1])):
+#             pv_final = np.mean(window)
+#             break
     
     t_prev = t
     pv_prev = pv
     cv_prev = cv
-step_change_array = pv_array[step_change_index:]
-for i in range(len(step_change_array) - window_size):
-    window = step_change_array[i:i+window_size]
-    if np.all(np.abs(window - window[-1]) < tolerance_pct * abs(window[-1])):
-        pv_final = np.mean(window)
-        #print(f"Final PV (settled at index {i}): {pv_final:.3f}")
-        break
-else:
-    print(" PV Never Stabilized")
+# step_change_array = pv_array[step_change_index:]
+# for i in range(len(step_change_array) - window_size):
+#     window = step_change_array[i:i+window_size]
+#     if np.all(np.abs(window - window[-1]) < tolerance_pct * abs(window[-1])):
+#         pv_final = np.mean(window)
+#         #print(f"Final PV (settled at index {i}): {pv_final:.3f}")
+#         break
+# else:
+#     print(" PV Never Stabilized")
     
 process_gain = (pv_final-pv_initial) / (cv_final - cv_initial)
 pv_63 = pv_initial + (0.632 * (pv_final - pv_initial))

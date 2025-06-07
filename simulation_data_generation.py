@@ -33,9 +33,16 @@ t_eval = np.linspace(0, sim_time, num_points)
 timestep = t_eval[1] - t_eval[0]
 
 scenario= {
-    "disturbance": False,
+    "disturbance": True,
     "measurement_noise": False
 }
+
+measurement_noise_magnitude = 0.01
+#print(disturbance_value)
+
+self_regulating = True
+integrating = False
+exponential = False
 
 # System Simulation
 def simulate_system(cv_array):
@@ -49,6 +56,12 @@ def simulate_system(cv_array):
     # Fill out the cv buffer with the CV init value to avoid starting at zero
     cv_delay_steps = max(1, int(np.round(dead_time / timestep)))
     cv_buffer = [cv_init] * cv_delay_steps
+    
+    disturbance_magnitude = 0.01
+    disturbance_time = 10
+    disturbance_duration = 2.0
+    disturbance_end = disturbance_time + disturbance_duration
+    disturbance_value = pv * disturbance_magnitude
 
     # Run the actual simulation for x time
     for i, t in enumerate(t_eval):
@@ -57,12 +70,19 @@ def simulate_system(cv_array):
             if t >= x[1]:
                 cv = x[0]
         
+        if scenario["disturbance"] and disturbance_time <= t < disturbance_end:
+            pv = pv - disturbance_value
         cv_buffer.append(cv)
         delayed_cv = cv_buffer.pop(0)
         # Update the PID simulation
-        dpv = (-pv + process_gain * delayed_cv) / time_constant
-        pv += dpv * timestep
-        pv = np.clip(pv, pv_min, pv_max)
+        if self_regulating == True:
+            dpv = (-pv + process_gain * delayed_cv) / time_constant
+            pv += dpv * timestep
+            pv = np.clip(pv, pv_min, pv_max)
+        elif integrating == True:
+            # Integrating process: dy/dt = K * u_delayed
+            dy = process_gain * delayed_cv * timestep
+            pv += dy
 
         # Measurement Noise logic
         if scenario["measurement_noise"]:

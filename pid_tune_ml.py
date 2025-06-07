@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import differential_evolution
 import time
+import pandas as pd
 
 starttime = time.time()
 
@@ -10,20 +11,20 @@ cv_start = 30.0
 cv_final = 70.0
 cv_min = 0
 cv_max = 100
-cv_init = 30
+cv_init = 47
 pv_start = 10.0
 pv_final = 45.0
 pv_min = 0
 pv_max = 250
-pv_init= 10
+pv_init= 40
 dead_time = 0.1
 tangent_time = 0.75
 setpoint = 40
 settling_tolerance = 0.005
-manual_kp = 0.5
-manual_ki = 0.2
+manual_kp = 0.185
+manual_ki = 0.7
 manual_kd = 0.0
-manual_test = False
+manual_test = True
 
 # Calculated Parameters
 cv_step_change = cv_final - cv_start
@@ -57,15 +58,16 @@ timestep = t_eval[1] - t_eval[0]
 # measurement noise tests with random measurement noise inserted onto the PV
 # magnitude is in decimal, 0.1=10%
 scenario= {
-    "disturbance": False,
+    "disturbance": True,
     "measurement_noise": False
 }
-disturbance_magnitude = 0.1
-disturbance_time = 10
-disturbance_duration = 0.5
-disturbance_end = disturbance_time + disturbance_duration
-disturbance_value = setpoint * disturbance_magnitude
+# disturbance_magnitude = 0.01
+# disturbance_time = 10
+# disturbance_duration = 2.0
+# disturbance_end = disturbance_time + disturbance_duration
+# disturbance_value = setpoint * disturbance_magnitude
 measurement_noise_magnitude = 0.01
+#print(disturbance_value)
 
 # PID Controller Class
 class PID:
@@ -105,17 +107,26 @@ def simulate_system(Kp, Ki, Kd):
     # Fill out the cv buffer with the CV init value to avoid starting at zero
     cv_delay_steps = max(1, int(np.round(dead_time / timestep)))
     cv_buffer = [cv_init] * cv_delay_steps
-
+    
+    disturbance_magnitude = 0.001
+    disturbance_time = 5
+    disturbance_duration = 3.0
+    disturbance_end = disturbance_time + disturbance_duration
+    disturbance_value = setpoint * disturbance_magnitude
+    sp = setpoint
     # Run the actual simulation for x time
     for i, t in enumerate(t_eval):
         # Update the PID every cycle
-        sp = setpoint
+        if scenario["disturbance"] and disturbance_time <= t < disturbance_end:
+            sp = sp - disturbance_value
+        else:
+            sp = setpoint
         error = sp - pv
         cv, integral = pid.update(error, timestep)
         
-        # Disturbance Logic
-        if scenario["disturbance"] and disturbance_time <= t < disturbance_end:
-            cv += -disturbance_value
+#         # Disturbance Logic
+#         if scenario["disturbance"] and disturbance_time <= t < disturbance_end:
+#             pv += -disturbance_value
         
         cv_buffer.append(cv)
         delayed_cv = cv_buffer.pop(0)
@@ -123,6 +134,9 @@ def simulate_system(Kp, Ki, Kd):
         dpv = (-pv + process_gain * delayed_cv) / time_constant
         pv += dpv * timestep
         pv = np.clip(pv, pv_min, pv_max)
+        #print(pv)
+#         if scenario["disturbance"] and disturbance_time <= t < disturbance_end:
+#             pv = pv - disturbance_value
 
         # Measurement Noise logic
         if scenario["measurement_noise"]:
@@ -272,6 +286,11 @@ plt.title("Final Optimized PID Response")
 plt.legend()
 plt.grid(True)
 plt.tight_layout()
+
+combined = np.column_stack((t_eval, pv, cv, sp))
+headers = ["Timestamp", "PV", "CV", "SP"]
+df = pd.DataFrame(combined, columns=headers)
+df.to_csv('combined_output.csv', index=False)
 
 endtime = time.time()
 print(f"Elapsed Time: {(endtime - starttime) / 60:.2f} minutes")
