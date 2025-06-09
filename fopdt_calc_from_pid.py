@@ -83,22 +83,28 @@ def cost_function(fopdt_params):
     trial_counter += 1
     error = pv_array-pv
     
-    ise = abs(np.sum(np.square(error)))
+    ise = np.sum(np.square(error)) * timestep
+    # Bias Error
+    bias_error = np.abs(np.mean(pv-pv_array))
+    #Dynamic shape matching
+    corr_coef = np.corrcoef(pv_array, pv)[0,1]
+    shape_penalty = 1 - corr_coef # Smaller is better
     # Overshoot Penalty Penalty calculation
     overshoot = np.maximum(0, abs(pv_array-pv))
     overshoot_penalty = np.sum(np.square(overshoot))
-    alpha = 1.0
-    beta = 1.0
-    cost = (ise * alpha) + (overshoot_penalty * beta)
+    alpha = 0.0
+    beta = 5.0
+    gamma = 10.0
+    cost = (ise * alpha) + (bias_error * beta) + (shape_penalty * gamma)
     return cost
 
 #pv_sim = simulate_system(t_array, cv_array, process_gain, time_constant, dead_time, pv_init=40)
-bounds = [(0,50), (0,50), (0,50)]
-#result = differential_evolution(cost_function, bounds, seed=42, strategy='best1bin', maxiter=100, popsize=15, tol=1e-6)
-#gain_opt, tc_opt, dt_opt = result.x
-gain_opt = process_gain
-tc_opt = time_constant
-dt_opt = dead_time
+bounds = [(0.01,1), (0.01,1), (0.01,1)]
+result = differential_evolution(cost_function, bounds, seed=42, strategy='best1bin', maxiter=100, popsize=15, tol=1e-6)
+gain_opt, tc_opt, dt_opt = result.x
+# gain_opt = process_gain
+# tc_opt = time_constant
+# dt_opt = dead_time
 pv_sim = simulate_system(t_array, cv_array, gain_opt, tc_opt, dt_opt, pv_init=40)
 print(f"\n✅ Optimized PID gains: Gain={gain_opt:.3f}, TC={tc_opt:.3f}, DT={dt_opt:.3f}")
 plt.figure(figsize=(10, 5))
