@@ -6,9 +6,6 @@ import numpy as np
 from scipy.optimize import differential_evolution
 
 # Constants
-cv_min, cv_max = 0, 100
-pv_min, pv_max = 0, 250
-setpoint = 40
 dead_time = 0.1
 tangent_time = 0.75
 points_per_second = 50
@@ -17,183 +14,277 @@ num_points = int(sim_time * points_per_second)
 t_eval = np.linspace(0, sim_time, num_points)
 timestep = t_eval[1] - t_eval[0]
 settling_tolerance = 0.005
-cv_init = 47
-pv_init = 40
-process_gain = (45.0 - 10.0) / (70.0 - 30.0)
 time_constant = max(1.1 * (tangent_time - dead_time), 0.1)
 
-# PID controller class
+# PID Controller Class
 class PID:
+    # Initialize PID, set parameters and set integral and error to zero
     def __init__(self, Kp, Ki, Kd, cv_init):
         self.Kp, self.Ki, self.Kd = Kp, Ki, Kd
-        self.integral = cv_init / Ki if Ki > 0 else 0.0
-        self.prev_error = 0
-
-    def reset(self):
         self.integral = cv_init / self.Ki if self.Ki > 0 else 0.0
         self.prev_error = 0
 
+    # Reset PID, set integral and error to zero
+    def reset(self):
+        self.integral = cv_init / self.Ki if self.Ki > 0 else 0.0
+        self.prev_error = 0
+        
+    # Core PID logic  
     def update(self, error, dt):
         self.integral += error * dt
         derivative = (error - self.prev_error) / dt if dt > 0 else 0
         control = np.clip(self.Kp * error + self.Ki * self.integral + self.Kd * derivative, cv_min, cv_max)
         self.prev_error = error
-        return control
+        integral = self.integral
+        return control, integral
 
-# System simulation
-def simulate_system(Kp, Ki, Kd, disturbance, noise):
+
+# System Simulation
+def simulate_system(Kp, Ki, Kd, cv_min, cv_max, cv_init, pv_min, pv_max, pv_init, setpoint):
+    # Call the PID and make sure it's reset at the start
     pid = PID(Kp, Ki, Kd, cv_init)
     pid.reset()
-    cv_buffer = [cv_init] * max(1, int(dead_time / timestep))
-    pv = np.clip(pv_init, pv_min, pv_max)
 
-    pv_array, sp_array, cv_array = [], [], []
+    # Initialize lists for cv/pv/sp histories
+    cv_history = []
+    pv_array = []
+    sp_array = []
+    
+    # Initialize CV and PV based on setpoints
+    pv = np.clip(pv_init, pv_min, pv_max)
+    # Fill out the cv buffer with the CV init value to avoid starting at zero
+    cv_delay_steps = max(1, int(np.round(dead_time / timestep)))
+    cv_buffer = [cv_init] * cv_delay_steps
+    
+    disturbance_magnitude = 0.001
+    disturbance_time = 5
+    disturbance_duration = 3.0
+    disturbance_end = disturbance_time + disturbance_duration
+    disturbance_value = setpoint * disturbance_magnitude
+    sp = setpoint
+    # Run the actual simulation for x time
     for i, t in enumerate(t_eval):
-        sp = setpoint - (setpoint * 0.001) if disturbance and 5 <= t < 8 else setpoint
+        # Update the PID every cycle
         error = sp - pv
-        cv = pid.update(error, timestep)
+        cv, integral = pid.update(error, timestep)
+        
         cv_buffer.append(cv)
         delayed_cv = cv_buffer.pop(0)
+        # Update the PID simulation
         dpv = (-pv + process_gain * delayed_cv) / time_constant
         pv += dpv * timestep
         pv = np.clip(pv, pv_min, pv_max)
-        if noise:
-            pv += np.random.normal(0, 0.01)
+        
+        # Add the PV, cv and SP to arrays for plotting
         pv_array.append(pv)
-        cv_array.append(cv)
+        cv_history.append(cv)
         sp_array.append(sp)
-    return np.array(t_eval), np.array(pv_array), np.array(sp_array), np.array(cv_array)
+    return np.array(pv_array), np.array(sp_array), np.array(cv_history)
 
-def compute_settling_time(pv, t, sp, tol=settling_tolerance):
-    band_upper = sp * (1 + tol)
-    band_lower = sp * (1 - tol)
-    for i in range(len(pv)):
-        if np.all((pv[i:] >= band_lower) & (pv[i:] <= band_upper)):
+# Compute Settling Time
+def compute_settling_time(pv, t, setpoint, tolerance=settling_tolerance):
+    pv = np.asarray(pv)
+    t = np.asarray(t)
+
+    min_len = min(len(pv), len(t))
+    pv = pv[:min_len]
+    t = t[:min_len]
+
+    band_upper = setpoint * (1 + tolerance)
+    band_lower = setpoint * (1 - tolerance)
+
+    for i in range(min_len):
+        window = pv[i:]
+        if np.all((window >= band_lower) & (window <= band_upper)):
             return t[i]
-    return t[-1]
+    return t[-1]  # If it never settles
 
-def cost_function(params, disturbance, noise):
-    Kp, Ki, Kd = params
-    if Kp < 0 or Ki < 0 or Kd < 0:
-        return 1e6
-    t, pv, sp, _ = simulate_system(Kp, Ki, Kd, disturbance, noise)
-    overshoot = max(0, np.max(pv - sp))
-    settling = compute_settling_time(pv, t, sp[-1])
-    return 5 * overshoot + settling  # weighted cost
+trial_counter = 0
 
 # GUI application
 class PIDApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("PID Simulation with Optimization")
-        self.geometry("500x400")
+        self.geometry("1200x600")
         self.kp_var = tk.DoubleVar(value=0.185)
         self.ki_var = tk.DoubleVar(value=0.7)
         self.kd_var = tk.DoubleVar(value=0.0)
+        self.cv_min = tk.DoubleVar(value=0.0)
+        self.cv_max = tk.DoubleVar(value=100.0)
+        self.cv_start = tk.DoubleVar(value=30.0)
+        self.cv_final = tk.DoubleVar(value=70.0)
+        self.cv_init = tk.DoubleVar(value=30.0)
+        self.pv_min = tk.DoubleVar(value=0.0)
+        self.pv_max = tk.DoubleVar(value=250.0)
+        self.pv_start = tk.DoubleVar(value=10.0)
+        self.pv_final = tk.DoubleVar(value=45.0)
+        self.pv_init = tk.DoubleVar(value=20.0)
+        self.setpoint = tk.DoubleVar(value=40.0)
+        self.process_gain = tk.DoubleVar(value=(self.pv_final - self.pv_start) / (self.cv_final - self.cv_start))
         self.disturbance = tk.BooleanVar(value=True)
         self.noise = tk.BooleanVar(value=False)
         self.create_widgets()
+        self.init_plot()
 
     def create_widgets(self):
-        ttk.Label(self, text="Kp:").grid(row=0, column=0, sticky="e")
-        ttk.Entry(self, textvariable=self.kp_var).grid(row=0, column=1)
+        process = ttk.LabelFrame(self, text="Process")
+        process.grid(row=0, column=0, sticky="ns", padx=5, pady=5)
+        
+        ttk.Label(process, text="CV Min").grid(row=0, column=0, stick="e")
+        ttk.Entry(process, textvariable=cv_min).grid(row=0, column=1)
+        
+        ttk.Label(process, text="CV Max").grid(row=1, column=0, stick="e")
+        ttk.Entry(process, textvariable=cv_max).grid(row=1, column=1)
+        
+        ttk.Label(process, text="CV Initial").grid(row=2, column=0, stick="e")
+        ttk.Entry(process, textvariable=cv_init).grid(row=2, column=1)
+        
+        ttk.Label(process, text="CV Start").grid(row=3, column=0, stick="e")
+        ttk.Entry(process, textvariable=cv_start).grid(row=3, column=1)
+        
+        ttk.Label(process, text="CV Final").grid(row=4, column=0, stick="e")
+        ttk.Entry(process, textvariable=cv_final).grid(row=4, column=1)
+        
+        ttk.Label(process, text="PV Min").grid(row=5, column=0, stick="e")
+        ttk.Entry(process, textvariable=pv_min).grid(row=5, column=1)
+        
+        ttk.Label(process, text="PV Max").grid(row=6, column=0, stick="e")
+        ttk.Entry(process, textvariable=pv_max).grid(row=6, column=1)
+        
+        ttk.Label(process, text="PV Initial").grid(row=7, column=0, stick="e")
+        ttk.Entry(process, textvariable=pv_init).grid(row=7, column=1)
+        
+        ttk.Label(process, text="PV Start").grid(row=8, column=0, stick="e")
+        ttk.Entry(process, textvariable=pv_start).grid(row=8, column=1)
+        
+        ttk.Label(process, text="PV Final").grid(row=9, column=0, stick="e")
+        ttk.Entry(process, textvariable=pv_final).grid(row=9, column=1)
+        
+        controls = ttk.LabelFrame(self, text="Controls")
+        controls.grid(row=0, column=1, sticky="ns", padx=5, pady=5)
 
-        ttk.Label(self, text="Ki:").grid(row=1, column=0, sticky="e")
-        ttk.Entry(self, textvariable=self.ki_var).grid(row=1, column=1)
+        ttk.Label(controls, text="Kp:").grid(row=0, column=0, sticky="e")
+        ttk.Entry(controls, textvariable=self.kp_var).grid(row=0, column=1)
 
-        ttk.Label(self, text="Kd:").grid(row=2, column=0, sticky="e")
-        ttk.Entry(self, textvariable=self.kd_var).grid(row=2, column=1)
+        ttk.Label(controls, text="Ki:").grid(row=1, column=0, sticky="e")
+        ttk.Entry(controls, textvariable=self.ki_var).grid(row=1, column=1)
 
-        ttk.Checkbutton(self, text="Enable Disturbance", variable=self.disturbance).grid(row=3, column=0, columnspan=2)
-        ttk.Checkbutton(self, text="Enable Noise", variable=self.noise).grid(row=4, column=0, columnspan=2)
+        ttk.Label(controls, text="Kd:").grid(row=2, column=0, sticky="e")
+        ttk.Entry(controls, textvariable=self.kd_var).grid(row=2, column=1)
 
-        ttk.Button(self, text="Run Manual Simulation", command=self.run_manual).grid(row=5, column=0, columnspan=2, pady=10)
-        ttk.Button(self, text="Optimize PID", command=self.run_optimization).grid(row=6, column=0, columnspan=2, pady=5)
+        ttk.Checkbutton(controls, text="Disturbance", variable=self.disturbance).grid(row=3, column=0, sticky="w")
+        ttk.Checkbutton(controls, text="Measurement Noise", variable=self.noise).grid(row=4, column=0, sticky="w")
+
+        ttk.Button(controls, text="Run Simulation", command=self.run_manual).grid(row=5, column=0, columnspan=2, pady=5)
+        ttk.Button(controls, text="Optimize PID", command=self.run_optimization).grid(row=6, column=0, columnspan=2, pady=5)
+
+        self.plot_frame = ttk.LabelFrame(self, text="Live Plot")
+        self.plot_frame.grid(row=0, column=2, sticky="nsew", padx=5, pady=5)
+        self.columnconfigure(1, weight=1)
+        self.rowconfigure(0, weight=1)
+        self.plot_frame.rowconfigure(0, weight=1)
+        self.plot_frame.columnconfigure(0, weight=1)
+
+    def init_plot(self):
+        self.fig, self.ax = plt.subplots(figsize=(7, 4))
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.plot_frame)
+        self.canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        self.ax.set_title("Live PID Optimization")
+        self.ax.set_xlabel("Time (s)")
+        self.ax.set_ylabel("Value")
+        self.pv_line, = self.ax.plot([], [], label="PV")
+        self.sp_line, = self.ax.plot([], [], 'r--', label="SP")
+        self.cv_line, = self.ax.plot([], [], 'g:', label="CV")
+        self.ax.legend()
+        self.fig.tight_layout()
+        
+    def update_plot(self, t, pv, sp, cv, title):
+        self.ax.set_title(title)
+        self.pv_line.set_data(t, pv)
+        self.sp_line.set_data(t, sp)
+        self.cv_line.set_data(t, cv)
+        self.ax.relim()
+        self.ax.autoscale_view()
+        self.canvas.draw()
+        self.canvas.flush_events()
 
     def run_manual(self):
         kp = self.kp_var.get()
         ki = self.ki_var.get()
         kd = self.kd_var.get()
-        t, pv, sp, cv = simulate_system(kp, ki, kd, self.disturbance.get(), self.noise.get())
-        self.show_plot(t, pv, sp, cv, kp, ki, kd)
+        pv, sp, cv = simulate_system(kp, ki, kd, self.cv_min.get(), self.cv_max.get(), self.cv_init.get(), self.pv_min.get(), self.pv_max.get(), self.pv_init.get(), self.setpoint.get())
+        title = "PID Simulation"
+        self.update_plot(t_eval, pv, sp, cv, title)
 
     def run_optimization(self):
         # Create live plot window
-        self.live_fig, self.live_ax = plt.subplots(figsize=(7, 3))
-        self.live_plot_win = tk.Toplevel(self)
-        self.live_plot_win.title("Optimization Progress")
-        self.live_canvas = FigureCanvasTkAgg(self.live_fig, master=self.live_plot_win)
-        self.live_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        self.live_ax.set_title("Live PID Optimization")
-        self.live_ax.set_xlabel("Time (s)")
-        self.live_ax.set_ylabel("PV / SP / CV")
-        self.live_ax.grid(True)
-        self.live_lines = {
-            'pv': self.live_ax.plot([], [], label="PV")[0],
-            'sp': self.live_ax.plot([], [], 'r--', label="SP")[0],
-            'cv': self.live_ax.plot([], [], 'g:', label="CV")[0],
-        }
-        self.live_ax.legend()
-        self.live_fig.tight_layout()
-        plt.ion()
-        plt.show()
+        def live_cost_function(pid_gains):
+            global trial_counter
+            Kp, Ki, Kd = pid_gains
+            
+            # Run the system Simulation
+            pv, sp, cv= simulate_system(Kp, Ki, Kd, self.cv_min.get(), self.cv_max.get(), self.cv_init.get(), self.pv_min.get(), self.pv_max.get(), self.pv_init.get(), self.setpoint.get())
 
-        def live_cost_function(params):
-            Kp, Ki, Kd = params
-            if Kp < 0 or Ki < 0 or Kd < 0:
+            # If PV is not a number then reject this solution
+            if np.any(np.isnan(pv)) or np.any(np.isinf(pv)):
                 return 1e6
-            t, pv, sp, cv = simulate_system(Kp, Ki, Kd, self.disturbance.get(), self.noise.get())
+            
+            # Live plotting
+            trial_counter += 1
 
-            # Update live plot
-            self.live_lines['pv'].set_data(t, pv)
-            self.live_lines['sp'].set_data(t, sp)
-            self.live_lines['cv'].set_data(t, cv)
-            self.live_ax.relim()
-            self.live_ax.autoscale_view()
-            self.live_canvas.draw()
-            self.live_canvas.flush_events()
-            plt.pause(0.001)
-
-            overshoot = max(0, np.max(pv - sp))
-            settling = compute_settling_time(pv, t, sp[-1])
-            return 5 * overshoot + settling
+            # Calculate Error
+            error = sp - pv
+            
+            # Weighting Calculations
+            # Integrated Squared Error Calc
+            # This is mainly used to avoid scenarios where the pv never reaches the setpoint
+            ise = np.sum(np.square(error)) * timestep
+            
+            # Overshoot Penalty Penalty calculation
+            overshoot = np.maximum(0, pv - sp)
+            overshoot_penalty = np.sum(np.square(overshoot)) * timestep
+            
+            # Large initial PV change penalty
+            # Penalize large PV step changes
+            initial_window = int(1 / timestep)
+            initial_pv = pv[0]
+            transient_deviation = np.abs(pv[:initial_window] - initial_pv)
+            initial_instability_penalty = np.sum(transient_deviation)
+            
+            # Large initial control actions penalty
+            # Penalize large CV step changes
+            initial_cv_penalty = np.sum(np.abs(np.diff(cv[:initial_window])))
+            
+            # Settling time Penalty
+            settling_time = compute_settling_time(pv, t_eval, sp[-1])
+            
+            # Weighting Setpoints - adjust these based on your process to get the best response
+            # ISE Weight
+            alpha = 1.0
+            # Overshoot Penalty Weight
+            beta = 10.0
+            # Large Initial PV Change Weight
+            gamma = 1.0
+            # Initial CV Jump Weight
+            delta = 1.0
+            # Settling Time Weight
+            epsilon = 10.0
+            
+            # Total Cost Calc
+            title = (f"Trial #{trial_counter+1} | Kp={Kp:.2f}, Ki={Ki:.2f}, Kd={Kd:.2f}")
+            cost = (alpha * ise) + (beta * overshoot_penalty) + (gamma * initial_instability_penalty) + (delta * initial_cv_penalty) + (epsilon * settling_time) 
+            self.update_plot(t_eval, pv, sp, cv, title)
+            return cost
 
         bounds = [(0, 2), (0, 2), (0, 1)]
-        result = differential_evolution(live_cost_function, bounds)
+        result = differential_evolution(live_cost_function, bounds, seed=42, strategy='best1bin', maxiter=100, popsize=15, tol=1e-6)
 
         # Final result
         kp, ki, kd = result.x
-        self.kp_var.set(kp)
-        self.ki_var.set(ki)
-        self.kd_var.set(kd)
-        t, pv, sp, cv = simulate_system(kp, ki, kd, self.disturbance.get(), self.noise.get())
-        self.show_plot(t, pv, sp, cv, kp, ki, kd)
-
-        plt.ioff()
-        self.live_plot_win.destroy()
-
-    def show_plot(self, t, pv, sp, cv, kp, ki, kd):
-        settling = compute_settling_time(pv, t, sp[-1])
-        overshoot = max(0, np.max(pv - sp))
-        overshoot_pct = (overshoot / (pv_max - pv_min)) * 100
-
-        plot_win = tk.Toplevel(self)
-        plot_win.title("Simulation Results")
-
-        fig, ax = plt.subplots(figsize=(8, 4))
-        ax.plot(t, pv, label="PV")
-        ax.plot(t, sp, 'r--', label="Setpoint")
-        ax.plot(t, cv, 'g:', label="CV")
-        ax.set_xlabel("Time (s)")
-        ax.set_ylabel("Values")
-        ax.set_title(f"Kp={kp:.3f}, Ki={ki:.3f}, Kd={kd:.3f} | Settling: {settling:.2f}s | Overshoot: {overshoot_pct:.2f}%")
-        ax.legend()
-        ax.grid(True)
-        fig.tight_layout()
-
-        canvas = FigureCanvasTkAgg(fig, master=plot_win)
-        canvas.draw()
-        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        pv, sp, cv = simulate_system(kp, ki, kd, self.cv_min.get(), self.cv_max.get(), self.cv_init.get(), self.pv_min.get(), self.pv_max.get(), self.pv_init.get(), self.setpoint.get())
+        title = (f"Final PID Optimization | Kp={kp:.3f}, Ki={ki:.3f}, Kd={kd:.3f}")
+        self.update_plot(t_eval, pv, sp, cv, title)
 
 # Launch GUI
 if __name__ == "__main__":

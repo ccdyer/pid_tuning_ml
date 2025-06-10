@@ -11,12 +11,12 @@ cv_start = 30.0
 cv_final = 70.0
 cv_min = 0
 cv_max = 100
-cv_init = 47
+cv_init = 30
 pv_start = 10.0
 pv_final = 45.0
 pv_min = 0
 pv_max = 250
-pv_init= 40
+pv_init= 20
 dead_time = 0.1
 tangent_time = 0.75
 setpoint = 40
@@ -24,7 +24,7 @@ settling_tolerance = 0.005
 manual_kp = 0.185
 manual_ki = 0.7
 manual_kd = 0.0
-manual_test = True
+manual_test = False
 
 # Calculated Parameters
 cv_step_change = cv_final - cv_start
@@ -58,7 +58,7 @@ timestep = t_eval[1] - t_eval[0]
 # measurement noise tests with random measurement noise inserted onto the PV
 # magnitude is in decimal, 0.1=10%
 scenario= {
-    "disturbance": True,
+    "disturbance": False,
     "measurement_noise": False
 }
 # disturbance_magnitude = 0.01
@@ -124,19 +124,12 @@ def simulate_system(Kp, Ki, Kd):
         error = sp - pv
         cv, integral = pid.update(error, timestep)
         
-#         # Disturbance Logic
-#         if scenario["disturbance"] and disturbance_time <= t < disturbance_end:
-#             pv += -disturbance_value
-        
         cv_buffer.append(cv)
         delayed_cv = cv_buffer.pop(0)
         # Update the PID simulation
         dpv = (-pv + process_gain * delayed_cv) / time_constant
         pv += dpv * timestep
         pv = np.clip(pv, pv_min, pv_max)
-        #print(pv)
-#         if scenario["disturbance"] and disturbance_time <= t < disturbance_end:
-#             pv = pv - disturbance_value
 
         # Measurement Noise logic
         if scenario["measurement_noise"]:
@@ -234,13 +227,13 @@ def cost_function(pid_gains):
     # ISE Weight
     alpha = 1.0
     # Overshoot Penalty Weight
-    beta = 1.0
+    beta = 10.0
     # Large Initial PV Change Weight
     gamma = 1.0
     # Initial CV Jump Weight
     delta = 1.0
     # Settling Time Weight
-    epsilon = 1.0
+    epsilon = 10.0
     
     # Total Cost Calc
     cost = (alpha * ise) + (beta * overshoot_penalty) + (gamma * initial_instability_penalty) + (delta * initial_cv_penalty) + (epsilon * settling_time) 
