@@ -16,10 +16,10 @@ pv_start = 10.0
 pv_final = 45.0
 pv_min = 0
 pv_max = 250
-pv_init= 20
+pv_init= 10
 dead_time = 0.1
 tangent_time = 0.75
-setpoint = 40
+setpoint = 45
 settling_tolerance = 0.005
 manual_kp = 0.185
 manual_ki = 0.7
@@ -245,7 +245,7 @@ def cost_function(pid_gains):
 # If it recommends max value I recommend increasing
 # D stands for do not use(unless you need it)
 if manual_test == False:
-    bounds = [(0, 50), (0, 50), (0, 50)]  # You can adjust these
+    bounds = [(0, 2), (0, 2), (0, 2)]  # You can adjust these
     result = differential_evolution(cost_function, bounds, seed=42, strategy='best1bin', maxiter=100, popsize=15, tol=1e-6)
     kp_opt, ki_opt, kd_opt = result.x
     print(f"\n✅ Optimized PID gains: Kp={kp_opt:.3f}, Ki={ki_opt:.3f}, Kd={kd_opt:.3f}")
