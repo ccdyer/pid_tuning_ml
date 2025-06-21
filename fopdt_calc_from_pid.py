@@ -4,26 +4,15 @@ from scipy.optimize import differential_evolution
 import time
 import pandas as pd
 
-df = pd.read_csv('combined_output.csv')
+df = pd.read_csv('combined_output0.csv')
 t_array = df['Timestamp'].to_numpy()
 pv_array = df['PV'].to_numpy()
 cv_array = df['CV'].to_numpy()
 sp_array = df['SP'].to_numpy()
 
-cv_min = 0
-cv_max = 100
-pv_min = 0
-pv_max = 250
-kp = 0.173
-ki = 0.702
-kd = -0.004
-dead_time = 0.1
-tangent_time = 0.75
-process_gain = 0.875
-time_constant = max(1.1 * (tangent_time - dead_time), 0.1)
-pv_init = 40
+pv_init = 10.6
 
-sim_time = 20
+sim_time = 60
 
 timestep = t_array[1] - t_array[0]
 
