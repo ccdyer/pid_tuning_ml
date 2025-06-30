@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import numpy as np
 from scipy.optimize import differential_evolution
+from dataclasses import dataclass
 
 # Constants
 points_per_second = 50
@@ -12,6 +13,22 @@ num_points = int(sim_time * points_per_second)
 t_eval = np.linspace(0, sim_time, num_points)
 timestep = t_eval[1] - t_eval[0]
 settling_tolerance = 0.005
+
+@dataclass
+class SimulationParams:
+    Kp: float
+    Ki: float
+    Kd: float
+    cv_min: float
+    cv_max: float
+    cv_start: float
+    pv_min: float
+    pv_max: float
+    pv_start: float
+    pv_final: float
+    process_gain: float
+    dead_time: float
+    time_constant: float
 
 # PID Controller Class
 class PID:
@@ -37,10 +54,10 @@ class PID:
 
 
 # System Simulation
-def simulate_system(Kp, Ki, Kd, cv_min, cv_max, cv_start, pv_min, pv_max, pv_start, pv_final, process_gain, dead_time, time_constant):
+def simulate_system(params: SimulationParams):
     # Call the PID and make sure it's reset at the start
-    pid = PID(Kp, Ki, Kd, cv_start)
-    pid.reset(cv_start)
+    pid = PID(params.Kp, params.Ki, params.Kd, params.cv_start)
+    pid.reset(params.cv_start)
 
     # Initialize lists for cv/pv/sp histories
     cv_history = []
@@ -48,29 +65,29 @@ def simulate_system(Kp, Ki, Kd, cv_min, cv_max, cv_start, pv_min, pv_max, pv_sta
     sp_array = []
     
     # Initialize CV and PV based on setpoints
-    pv = np.clip(pv_start, pv_min, pv_max)
+    pv = np.clip(params.pv_start, params.pv_min, params.pv_max)
     # Fill out the cv buffer with the CV init value to avoid starting at zero
-    cv_delay_steps = max(1, int(np.round(dead_time / timestep)))
-    cv_buffer = [cv_start] * cv_delay_steps
+    cv_delay_steps = max(1, int(np.round(params.dead_time / timestep)))
+    cv_buffer = [params.cv_start] * cv_delay_steps
     
     disturbance_magnitude = 0.001
     disturbance_time = 5
     disturbance_duration = 3.0
     disturbance_end = disturbance_time + disturbance_duration
-    disturbance_value = pv_final * disturbance_magnitude
-    sp = pv_final
+    disturbance_value = params.pv_final * disturbance_magnitude
+    sp = params.pv_final
     # Run the actual simulation for x time
     for i, t in enumerate(t_eval):
         # Update the PID every cycle
         error = sp - pv
-        cv, integral = pid.update(error, timestep, cv_min, cv_max)
+        cv, integral = pid.update(error, timestep, params.cv_min, params.cv_max)
         
         cv_buffer.append(cv)
         delayed_cv = cv_buffer.pop(0)
         # Update the PID simulation
-        dpv = (-pv + process_gain * delayed_cv) / time_constant
+        dpv = (-pv + params.process_gain * delayed_cv) / params.time_constant
         pv += dpv * timestep
-        pv = np.clip(pv, pv_min, pv_max)
+        pv = np.clip(pv, params.pv_min, params.pv_max)
         
         # Add the PV, cv and SP to arrays for plotting
         pv_array.append(pv)
@@ -116,7 +133,7 @@ class PIDApp(tk.Tk):
         self.pv_start = tk.DoubleVar(value=10.0)
         self.pv_final = tk.DoubleVar(value=45.0)
         self.dead_time = tk.DoubleVar(value=0.1)
-        self.tau = tk.Doublevar(value=0.75)
+        self.tau = tk.DoubleVar(value=0.75)
         self.time_constant = self.compute_time_constant()
         self.process_gain = self.compute_process_gain()
         self.disturbance = tk.BooleanVar(value=True)
@@ -213,12 +230,30 @@ class PIDApp(tk.Tk):
     
     def compute_time_constant(self):
         return (max(1.1 * (self.tau.get() - self.dead_time.get()), 0.1))
+    
+    def get_simulation_params(self, Kp, Ki, Kd):
+        return SimulationParams(
+            Kp=Kp,
+            Ki=Ki,
+            Kd=Kd,
+            cv_min=self.cv_min.get(),
+            cv_max=self.cv_max.get(),
+            cv_start=self.cv_start.get(),
+            pv_min=self.pv_min.get(),
+            pv_max=self.pv_max.get(),
+            pv_start=self.pv_start.get(),
+            pv_final=self.pv_final.get(),
+            process_gain=self.compute_process_gain(),
+            dead_time=self.dead_time.get(),
+            time_constant=self.compute_time_constant()
+        )
 
     def run_manual(self):
-        kp = self.kp_var.get()
-        ki = self.ki_var.get()
-        kd = self.kd_var.get()
-        pv, sp, cv = simulate_system(kp, ki, kd, self.cv_min.get(), self.cv_max.get(), self.cv_start.get(), self.pv_min.get(), self.pv_max.get(), self.pv_start.get(), self.pv_final.get(), self.process_gain, self.dead_time.get(), self.time_constant.get())
+        Kp = self.kp_var.get()
+        Ki = self.ki_var.get()
+        Kd = self.kd_var.get()
+        params = self.get_simulation_params(Kp, Ki, Kd)
+        pv, sp, cv = simulate_system(params)
         title = "PID Simulation"
         self.update_plot(t_eval, pv, sp, cv, title)
 
@@ -229,8 +264,9 @@ class PIDApp(tk.Tk):
             Kp, Ki, Kd = pid_gains
             
             # Run the system Simulation
-            pv, sp, cv= simulate_system(Kp, Ki, Kd, self.cv_min.get(), self.cv_max.get(), self.cv_start.get(), self.pv_min.get(), self.pv_max.get(), self.pv_start.get(), self.pv_final.get(), self.process_gain, self.dead_time.get(), self.time_constant.get())
-
+            params = self.get_simulation_params(Kp, Ki, Kd)
+            pv, sp, cv= simulate_system(params)
+            
             # If PV is not a number then reject this solution
             if np.any(np.isnan(pv)) or np.any(np.isinf(pv)):
                 return 1e6
@@ -287,7 +323,8 @@ class PIDApp(tk.Tk):
 
         # Final result
         kp, ki, kd = result.x
-        pv, sp, cv = simulate_system(kp, ki, kd, self.cv_min.get(), self.cv_max.get(), self.cv_start.get(), self.pv_min.get(), self.pv_max.get(), self.pv_start.get(), self.pv_final.get(), self.process_gain, self.dead_time.get(), self.time_constant.get())
+        params = self.get_simulation_params(kp, ki, kd)
+        pv, sp, cv= simulate_system(params)
         title = (f"Final PID Optimization | Kp={kp:.3f}, Ki={ki:.3f}, Kd={kd:.3f}")
         self.update_plot(t_eval, pv, sp, cv, title)
 
