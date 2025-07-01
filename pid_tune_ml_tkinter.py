@@ -141,9 +141,9 @@ class PIDApp(tk.Tk):
         self.create_widgets()
         self.init_plot()
 
-    def create_widgets(self):
+    def create_widgets(self):     
         process = ttk.LabelFrame(self, text="Process")
-        process.grid(row=0, column=0, sticky="ns", padx=5, pady=5)
+        process.grid(row=0, column=0, sticky="nwns", padx=5, pady=5)
         
         ttk.Label(process, text="Control Variable").grid(row=0, column=0, stick="e")
         
@@ -173,27 +173,28 @@ class PIDApp(tk.Tk):
         ttk.Label(process, text="PV Final").grid(row=9, column=0, stick="e")
         ttk.Entry(process, textvariable=self.pv_final).grid(row=9, column=1)
         
-        ttk.Label(process, text="Process Simulation").grid(row=10, column=0, stick="e")
+        simulation = ttk.LabelFrame(self, text="Simulation")
+        simulation.grid(row=0, column=1, sticky="nwns", padx=5, pady=5)
+
+        ttk.Label(simulation, text="Process Gain(Kp):").grid(row=0, column=0, sticky="e")
+        ttk.Entry(simulation, textvariable=self.process_gain).grid(row=0, column=1)
+
+        ttk.Label(simulation, text="Time Constant(τp):").grid(row=1, column=0, sticky="e")
+        ttk.Entry(simulation, textvariable=self.time_constant).grid(row=1, column=1)
+
+        ttk.Label(simulation, text="Dead Time (θp):").grid(row=2, column=0, sticky="e")
+        ttk.Entry(simulation, textvariable=self.dead_time).grid(row=2, column=1)
+
+#         ttk.Checkbutton(simulation, text="Disturbance", variable=self.disturbance).grid(row=3, column=0, sticky="w")
+#         ttk.Checkbutton(simulation, text="Measurement Noise", variable=self.noise).grid(row=4, column=0, sticky="w")
+
+#         ttk.Button(simulation, text="Run Simulation", command=self.run_manual).grid(row=5, column=0, columnspan=2, pady=5)
+        ttk.Button(simulation, text="Optimize PID", command=self.run_optimization).grid(row=6, column=0, columnspan=2, pady=5)
         
-        ttk.Label
+        instruction = ttk.LabelFrame(self, text="Instructions")
+        instruction.grid(row=1, column=0, columnspan=2, sticky="nwew", padx=5, pady=5)
         
-        controls = ttk.LabelFrame(self, text="Controls")
-        controls.grid(row=0, column=1, sticky="ns", padx=5, pady=5)
-
-        ttk.Label(controls, text="Kp:").grid(row=0, column=0, sticky="e")
-        ttk.Entry(controls, textvariable=self.kp_var).grid(row=0, column=1)
-
-        ttk.Label(controls, text="Ki:").grid(row=1, column=0, sticky="e")
-        ttk.Entry(controls, textvariable=self.ki_var).grid(row=1, column=1)
-
-        ttk.Label(controls, text="Kd:").grid(row=2, column=0, sticky="e")
-        ttk.Entry(controls, textvariable=self.kd_var).grid(row=2, column=1)
-
-        ttk.Checkbutton(controls, text="Disturbance", variable=self.disturbance).grid(row=3, column=0, sticky="w")
-        ttk.Checkbutton(controls, text="Measurement Noise", variable=self.noise).grid(row=4, column=0, sticky="w")
-
-        ttk.Button(controls, text="Run Simulation", command=self.run_manual).grid(row=5, column=0, columnspan=2, pady=5)
-        ttk.Button(controls, text="Optimize PID", command=self.run_optimization).grid(row=6, column=0, columnspan=2, pady=5)
+        ttk.Label(instruction, text="Instructions").grid(row=0, column=0, stick="e")
 
         self.plot_frame = ttk.LabelFrame(self, text="Live Plot")
         self.plot_frame.grid(row=0, column=2, sticky="nsew", padx=5, pady=5)
