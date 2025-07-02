@@ -113,6 +113,10 @@ def compute_settling_time(pv, t, pv_final, tolerance=settling_tolerance):
             return t[i]
     return t[-1]  # If it never settles
 
+def truncate_float(value, decimals=2):
+    factor = 10 ** decimals
+    return int(value * factor) / factor
+
 trial_counter = 0
 
 # GUI application
@@ -120,7 +124,7 @@ class PIDApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("PID Simulation with Optimization")
-        self.geometry("1200x600")
+        self.geometry("1500x600")
         self.kp_var = tk.DoubleVar(value=0.185)
         self.ki_var = tk.DoubleVar(value=0.7)
         self.kd_var = tk.DoubleVar(value=0.0)
@@ -134,10 +138,31 @@ class PIDApp(tk.Tk):
         self.pv_final = tk.DoubleVar(value=45.0)
         self.dead_time = tk.DoubleVar(value=0.1)
         self.tau = tk.DoubleVar(value=0.75)
-        self.time_constant = self.compute_time_constant()
-        self.process_gain = self.compute_process_gain()
-        self.disturbance = tk.BooleanVar(value=True)
-        self.noise = tk.BooleanVar(value=False)
+        self.sixtythreepctvalue = tk.DoubleVar(value=self.compute_sixtythree_pct_value())
+        self.time_constant = tk.DoubleVar(value=self.compute_time_constant())
+        self.truncated_time_constant = tk.StringVar(value=str(truncate_float(self.time_constant.get(), 3)))
+        self.process_gain = tk.DoubleVar(value=self.compute_process_gain())
+        self.overshoot = tk.StringVar(value="0.0")
+        self.overshoot_pct = tk.StringVar(value="0.0%")
+        self.settling_time = tk.StringVar(value="0.0s")
+        self.elapsed_time = tk.StringVar(value="0.0s")
+        
+        #Add logic for live updates of necessary values
+        self.live_process_gain = tk.StringVar()
+        self.live_sixtythree_pct = tk.StringVar()
+        self.live_time_constant = tk.StringVar()
+        # These variables affect process gain
+        self.cv_start.trace_add("write", lambda *args: self.update_simulation_outputs())
+        self.cv_final.trace_add("write", lambda *args: self.update_simulation_outputs())
+        self.pv_start.trace_add("write", lambda *args: self.update_simulation_outputs())
+        self.pv_final.trace_add("write", lambda *args: self.update_simulation_outputs())
+
+        # These affect time constant and 63.2% value
+        self.tau.trace_add("write", lambda *args: self.update_simulation_outputs())
+        self.dead_time.trace_add("write", lambda *args: self.update_simulation_outputs())
+#         self.disturbance = tk.BooleanVar(value=True)
+#         self.noise = tk.BooleanVar(value=False)
+        self.update_simulation_outputs()
         self.create_widgets()
         self.init_plot()
 
@@ -175,26 +200,48 @@ class PIDApp(tk.Tk):
         
         simulation = ttk.LabelFrame(self, text="Simulation")
         simulation.grid(row=0, column=1, sticky="nwns", padx=5, pady=5)
+        
+        ttk.Label(simulation, text="Process Parameters").grid(row=0, column=0, sticky="w")
 
-        ttk.Label(simulation, text="Process Gain(Kp):").grid(row=0, column=0, sticky="e")
-        ttk.Entry(simulation, textvariable=self.process_gain).grid(row=0, column=1)
-
-        ttk.Label(simulation, text="Time Constant(τp):").grid(row=1, column=0, sticky="e")
-        ttk.Entry(simulation, textvariable=self.time_constant).grid(row=1, column=1)
-
+        ttk.Label(simulation, text="Process Gain(Kp):").grid(row=1, column=0, sticky="e")
+        ttk.Entry(simulation, textvariable=self.live_process_gain, state="readonly").grid(row=1, column=1)
+        
         ttk.Label(simulation, text="Dead Time (θp):").grid(row=2, column=0, sticky="e")
         ttk.Entry(simulation, textvariable=self.dead_time).grid(row=2, column=1)
+        
+        ttk.Label(simulation, text="63.2% Value (t0.632):").grid(row=3, column=0, sticky="e")
+        ttk.Entry(simulation, textvariable=self.live_sixtythree_pct, state="readonly").grid(row=3, column=1)
+        
+        ttk.Label(simulation, text="Time at 63.2% Value (tau):").grid(row=4, column=0, sticky="e")
+        ttk.Entry(simulation, textvariable=self.tau).grid(row=4, column=1)
+
+        ttk.Label(simulation, text="Time Constant(τp):").grid(row=5, column=0, sticky="e")
+        ttk.Entry(simulation, textvariable=self.live_time_constant, state="readonly").grid(row=5, column=1)
 
 #         ttk.Checkbutton(simulation, text="Disturbance", variable=self.disturbance).grid(row=3, column=0, sticky="w")
 #         ttk.Checkbutton(simulation, text="Measurement Noise", variable=self.noise).grid(row=4, column=0, sticky="w")
 
-#         ttk.Button(simulation, text="Run Simulation", command=self.run_manual).grid(row=5, column=0, columnspan=2, pady=5)
         ttk.Button(simulation, text="Optimize PID", command=self.run_optimization).grid(row=6, column=0, columnspan=2, pady=5)
+        
+        ttk.Label(simulation, text="PID Tuning Parmeters").grid(row=7, column=0, sticky="w")
+        
+        ttk.Label(simulation, text="Kp:").grid(row=8, column=0, sticky="e")
+        ttk.Entry(simulation, textvariable=self.kp_var).grid(row=8, column=1)
+        
+        ttk.Label(simulation, text="Ki:").grid(row=9, column=0, sticky="e")
+        ttk.Entry(simulation, textvariable=self.ki_var).grid(row=9, column=1)
+        
+        ttk.Label(simulation, text="Kd:").grid(row=10, column=0, sticky="e")
+        ttk.Entry(simulation, textvariable=self.kd_var).grid(row=10, column=1)
+        
+        ttk.Button(simulation, text="Run Simulation", command=self.run_manual).grid(row=11, column=0, columnspan=2, pady=5)
+        
+        ttk.Label(simulation, text="Max Overshoot:").grid(row=12, column=0
         
         instruction = ttk.LabelFrame(self, text="Instructions")
         instruction.grid(row=1, column=0, columnspan=2, sticky="nwew", padx=5, pady=5)
         
-        ttk.Label(instruction, text="Instructions").grid(row=0, column=0, stick="e")
+        ttk.Label(instruction, text="1. Make a step change in your CV.  This change should be in the normal operating range of your process, and should be large enough to see a noticable(>10% of full range) change in your PV").grid(row=0, column=0, stick="e")
 
         self.plot_frame = ttk.LabelFrame(self, text="Live Plot")
         self.plot_frame.grid(row=0, column=2, sticky="nsew", padx=5, pady=5)
@@ -225,12 +272,46 @@ class PIDApp(tk.Tk):
         self.ax.autoscale_view()
         self.canvas.draw()
         self.canvas.flush_events()
-        
+
     def compute_process_gain(self):
-        return (self.pv_final.get() - self.pv_start.get()) / (self.cv_final.get() - self.cv_start.get())
-    
+        try:
+            pv_final = float(self.pv_final.get())
+            pv_start = float(self.pv_start.get())
+            cv_final = float(self.cv_final.get())
+            cv_start = float(self.cv_start.get())
+            if cv_final == cv_start:
+                return 0.0  # avoid divide by zero
+            return (pv_final - pv_start) / (cv_final - cv_start)
+        except (tk.TclError, ValueError):
+            return 0.0
+
     def compute_time_constant(self):
-        return (max(1.1 * (self.tau.get() - self.dead_time.get()), 0.1))
+        try:
+            tau = float(self.tau.get())
+            dead_time = float(self.dead_time.get())
+            return max(1.1 * (tau - dead_time), 0.1)
+        except (tk.TclError, ValueError):
+            return 0.1
+
+    def compute_sixtythree_pct_value(self):
+        try:
+            pv_final = float(self.pv_final.get())
+            pv_start = float(self.pv_start.get())
+            return (abs(pv_final - pv_start) * 0.632) + pv_start
+        except (tk.TclError, ValueError):
+            return 0.0
+    
+    def update_simulation_outputs(self):
+        pg = self.compute_process_gain()
+        sixtythree = self.compute_sixtythree_pct_value()
+        taup = self.compute_time_constant()
+
+        self.process_gain.set(pg)
+        self.time_constant.set(taup)
+
+        self.live_process_gain.set(str(truncate_float(pg, 3)))
+        self.live_sixtythree_pct.set(str(truncate_float(sixtythree, 3)))
+        self.live_time_constant.set(str(truncate_float(taup, 3)))
     
     def get_simulation_params(self, Kp, Ki, Kd):
         return SimulationParams(
@@ -328,6 +409,10 @@ class PIDApp(tk.Tk):
         pv, sp, cv= simulate_system(params)
         title = (f"Final PID Optimization | Kp={kp:.3f}, Ki={ki:.3f}, Kd={kd:.3f}")
         self.update_plot(t_eval, pv, sp, cv, title)
+        self.overshoot.set(round(
+        self.kp_var.set(round(kp, 3))
+        self.ki_var.set(round(ki, 3))
+        self.kd_var.set(round(kd, 3))
 
 # Launch GUI
 if __name__ == "__main__":
