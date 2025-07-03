@@ -5,6 +5,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import numpy as np
 from scipy.optimize import differential_evolution
 from dataclasses import dataclass
+import time
 
 # Constants
 points_per_second = 50
@@ -142,8 +143,8 @@ class PIDApp(tk.Tk):
         self.time_constant = tk.DoubleVar(value=self.compute_time_constant())
         self.truncated_time_constant = tk.StringVar(value=str(truncate_float(self.time_constant.get(), 3)))
         self.process_gain = tk.DoubleVar(value=self.compute_process_gain())
-        self.overshoot = tk.StringVar(value="0.0")
-        self.overshoot_pct = tk.StringVar(value="0.0%")
+        self.max_overshoot = tk.StringVar(value="0.0")
+        self.max_overshoot_pct = tk.StringVar(value="0.0%")
         self.settling_time = tk.StringVar(value="0.0s")
         self.elapsed_time = tk.StringVar(value="0.0s")
         
@@ -169,74 +170,109 @@ class PIDApp(tk.Tk):
     def create_widgets(self):     
         process = ttk.LabelFrame(self, text="Process")
         process.grid(row=0, column=0, sticky="nwns", padx=5, pady=5)
+        process_row = 0
+        ttk.Label(process, text="Control Variable").grid(row=process_row, column=0, stick="e")
         
-        ttk.Label(process, text="Control Variable").grid(row=0, column=0, stick="e")
+        process_row +=1
+        ttk.Label(process, text="CV Min").grid(row=process_row, column=0, stick="e")
+        ttk.Entry(process, textvariable=self.cv_min).grid(row=process_row, column=1)
         
-        ttk.Label(process, text="CV Min").grid(row=1, column=0, stick="e")
-        ttk.Entry(process, textvariable=self.cv_min).grid(row=1, column=1)
+        process_row +=1
+        ttk.Label(process, text="CV Max").grid(row=process_row, column=0, stick="e")
+        ttk.Entry(process, textvariable=self.cv_max).grid(row=process_row, column=1)
         
-        ttk.Label(process, text="CV Max").grid(row=2, column=0, stick="e")
-        ttk.Entry(process, textvariable=self.cv_max).grid(row=2, column=1)
+        process_row +=1
+        ttk.Label(process, text="CV Start").grid(row=process_row, column=0, stick="e")
+        ttk.Entry(process, textvariable=self.cv_start).grid(row=process_row, column=1)
         
-        ttk.Label(process, text="CV Start").grid(row=3, column=0, stick="e")
-        ttk.Entry(process, textvariable=self.cv_start).grid(row=3, column=1)
+        process_row +=1
+        ttk.Label(process, text="CV Final").grid(row=process_row, column=0, stick="e")
+        ttk.Entry(process, textvariable=self.cv_final).grid(row=process_row, column=1)
         
-        ttk.Label(process, text="CV Final").grid(row=4, column=0, stick="e")
-        ttk.Entry(process, textvariable=self.cv_final).grid(row=4, column=1)
+        process_row +=1
+        ttk.Label(process, text="Process Variable").grid(row=process_row, column=0, stick="e")
         
-        ttk.Label(process, text="Process Variable").grid(row=5, column=0, stick="e")
+        process_row +=1
+        ttk.Label(process, text="PV Min").grid(row=process_row, column=0, stick="e")
+        ttk.Entry(process, textvariable=self.pv_min).grid(row=process_row, column=1)
         
-        ttk.Label(process, text="PV Min").grid(row=6, column=0, stick="e")
-        ttk.Entry(process, textvariable=self.pv_min).grid(row=6, column=1)
+        process_row +=1
+        ttk.Label(process, text="PV Max").grid(row=process_row, column=0, stick="e")
+        ttk.Entry(process, textvariable=self.pv_max).grid(row=process_row, column=1)
         
-        ttk.Label(process, text="PV Max").grid(row=7, column=0, stick="e")
-        ttk.Entry(process, textvariable=self.pv_max).grid(row=7, column=1)
+        process_row +=1
+        ttk.Label(process, text="PV Start").grid(row=process_row, column=0, stick="e")
+        ttk.Entry(process, textvariable=self.pv_start).grid(row=process_row, column=1)
         
-        ttk.Label(process, text="PV Start").grid(row=8, column=0, stick="e")
-        ttk.Entry(process, textvariable=self.pv_start).grid(row=8, column=1)
-        
-        ttk.Label(process, text="PV Final").grid(row=9, column=0, stick="e")
-        ttk.Entry(process, textvariable=self.pv_final).grid(row=9, column=1)
+        process_row +=1
+        ttk.Label(process, text="PV Final").grid(row=process_row, column=0, stick="e")
+        ttk.Entry(process, textvariable=self.pv_final).grid(row=process_row, column=1)
         
         simulation = ttk.LabelFrame(self, text="Simulation")
         simulation.grid(row=0, column=1, sticky="nwns", padx=5, pady=5)
         
-        ttk.Label(simulation, text="Process Parameters").grid(row=0, column=0, sticky="w")
-
-        ttk.Label(simulation, text="Process Gain(Kp):").grid(row=1, column=0, sticky="e")
-        ttk.Entry(simulation, textvariable=self.live_process_gain, state="readonly").grid(row=1, column=1)
+        simulation_row = 0
+        ttk.Label(simulation, text="Process Parameters").grid(row=simulation_row, column=0, sticky="w")
         
-        ttk.Label(simulation, text="Dead Time (θp):").grid(row=2, column=0, sticky="e")
-        ttk.Entry(simulation, textvariable=self.dead_time).grid(row=2, column=1)
+        simulation_row += 1
+        ttk.Label(simulation, text="Process Gain(Kp):").grid(row=simulation_row, column=0, sticky="e")
+        ttk.Entry(simulation, textvariable=self.live_process_gain, state="readonly").grid(row=simulation_row, column=1)
         
-        ttk.Label(simulation, text="63.2% Value (t0.632):").grid(row=3, column=0, sticky="e")
-        ttk.Entry(simulation, textvariable=self.live_sixtythree_pct, state="readonly").grid(row=3, column=1)
+        simulation_row += 1
+        ttk.Label(simulation, text="Dead Time (θp):").grid(row=simulation_row, column=0, sticky="e")
+        ttk.Entry(simulation, textvariable=self.dead_time).grid(row=simulation_row, column=1)
         
-        ttk.Label(simulation, text="Time at 63.2% Value (tau):").grid(row=4, column=0, sticky="e")
-        ttk.Entry(simulation, textvariable=self.tau).grid(row=4, column=1)
-
-        ttk.Label(simulation, text="Time Constant(τp):").grid(row=5, column=0, sticky="e")
-        ttk.Entry(simulation, textvariable=self.live_time_constant, state="readonly").grid(row=5, column=1)
+        simulation_row += 1
+        ttk.Label(simulation, text="63.2% Value (t0.632):").grid(row=simulation_row, column=0, sticky="e")
+        ttk.Entry(simulation, textvariable=self.live_sixtythree_pct, state="readonly").grid(row=simulation_row, column=1)
+        
+        simulation_row += 1
+        ttk.Label(simulation, text="Time at 63.2% Value (tau):").grid(row=simulation_row, column=0, sticky="e")
+        ttk.Entry(simulation, textvariable=self.tau).grid(row=simulation_row, column=1)
+        
+        simulation_row += 1
+        ttk.Label(simulation, text="Time Constant(τp):").grid(row=simulation_row, column=0, sticky="e")
+        ttk.Entry(simulation, textvariable=self.live_time_constant, state="readonly").grid(row=simulation_row, column=1)
 
 #         ttk.Checkbutton(simulation, text="Disturbance", variable=self.disturbance).grid(row=3, column=0, sticky="w")
 #         ttk.Checkbutton(simulation, text="Measurement Noise", variable=self.noise).grid(row=4, column=0, sticky="w")
-
-        ttk.Button(simulation, text="Optimize PID", command=self.run_optimization).grid(row=6, column=0, columnspan=2, pady=5)
         
-        ttk.Label(simulation, text="PID Tuning Parmeters").grid(row=7, column=0, sticky="w")
+        simulation_row += 1
+        ttk.Button(simulation, text="Optimize PID", command=self.run_optimization).grid(row=simulation_row, column=0, columnspan=2, pady=5)
         
-        ttk.Label(simulation, text="Kp:").grid(row=8, column=0, sticky="e")
-        ttk.Entry(simulation, textvariable=self.kp_var).grid(row=8, column=1)
+        simulation_row += 1
+        ttk.Label(simulation, text="PID Tuning Parmeters").grid(row=simulation_row, column=0, sticky="w")
         
-        ttk.Label(simulation, text="Ki:").grid(row=9, column=0, sticky="e")
-        ttk.Entry(simulation, textvariable=self.ki_var).grid(row=9, column=1)
+        simulation_row += 1
+        ttk.Label(simulation, text="Kp:").grid(row=simulation_row, column=0, sticky="e")
+        ttk.Entry(simulation, textvariable=self.kp_var).grid(row=simulation_row, column=1)
         
-        ttk.Label(simulation, text="Kd:").grid(row=10, column=0, sticky="e")
-        ttk.Entry(simulation, textvariable=self.kd_var).grid(row=10, column=1)
+        simulation_row += 1
+        ttk.Label(simulation, text="Ki:").grid(row=simulation_row, column=0, sticky="e")
+        ttk.Entry(simulation, textvariable=self.ki_var).grid(row=simulation_row, column=1)
         
-        ttk.Button(simulation, text="Run Simulation", command=self.run_manual).grid(row=11, column=0, columnspan=2, pady=5)
+        simulation_row += 1
+        ttk.Label(simulation, text="Kd:").grid(row=simulation_row, column=0, sticky="e")
+        ttk.Entry(simulation, textvariable=self.kd_var).grid(row=simulation_row, column=1)
         
-        ttk.Label(simulation, text="Max Overshoot:").grid(row=12, column=0
+        simulation_row += 1
+        ttk.Button(simulation, text="Manual Simulation", command=self.run_manual).grid(row=simulation_row, column=0, columnspan=2, pady=5)
+        
+        simulation_row += 1
+        ttk.Label(simulation, text="Max Overshoot:").grid(row=simulation_row, column=0, sticky="e")
+        ttk.Entry(simulation, textvariable=self.max_overshoot, state="readonly").grid(row=simulation_row, column=1)
+        
+        simulation_row += 1
+        ttk.Label(simulation, text="Max Overshoot Percent:").grid(row=simulation_row, column=0, sticky="e")
+        ttk.Entry(simulation, textvariable=self.max_overshoot_pct, state="readonly").grid(row=simulation_row, column=1)
+        
+        simulation_row += 1
+        ttk.Label(simulation, text="Settling Time:").grid(row=simulation_row, column=0, sticky="e")
+        ttk.Entry(simulation, textvariable=self.settling_time, state="readonly").grid(row=simulation_row, column=1)
+        
+        simulation_row += 1
+        ttk.Label(simulation, text="Elapsed Time:").grid(row=simulation_row, column=0, sticky="e")
+        ttk.Entry(simulation, textvariable=self.elapsed_time, state="readonly").grid(row=simulation_row, column=1)
         
         instruction = ttk.LabelFrame(self, text="Instructions")
         instruction.grid(row=1, column=0, columnspan=2, sticky="nwew", padx=5, pady=5)
@@ -341,6 +377,7 @@ class PIDApp(tk.Tk):
 
     def run_optimization(self):
         # Create live plot window
+        starttime = time.time()
         def live_cost_function(pid_gains):
             global trial_counter
             Kp, Ki, Kd = pid_gains
@@ -407,12 +444,22 @@ class PIDApp(tk.Tk):
         kp, ki, kd = result.x
         params = self.get_simulation_params(kp, ki, kd)
         pv, sp, cv= simulate_system(params)
-        title = (f"Final PID Optimization | Kp={kp:.3f}, Ki={ki:.3f}, Kd={kd:.3f}")
+        title = (f"Final PID Optimization | Kp:{kp:.3f}, Ki:{ki:.3f}, Kd:{kd:.3f}, Trials:{trial_counter}")
         self.update_plot(t_eval, pv, sp, cv, title)
-        self.overshoot.set(round(
         self.kp_var.set(round(kp, 3))
         self.ki_var.set(round(ki, 3))
         self.kd_var.set(round(kd, 3))
+        sp_val = sp[-1]
+        #pv_range = pv_max - pv_min
+        max_overshoot_val = max(0, (np.max(pv) - sp_val))
+        max_overshoot_pct = (max_overshoot_val / sp_val) * 100
+        settling_time_val = compute_settling_time(pv, t_eval, sp_val)
+        self.max_overshoot.set(f"{max_overshoot_val:.2f}")
+        self.max_overshoot_pct.set(f"{max_overshoot_pct:.2f}%")
+        self.settling_time.set(f"{settling_time_val:.2f}s")
+        endtime = time.time()
+        elapsed_time_val = endtime - starttime
+        self.elapsed_time.set(f"{elapsed_time_val:.2f}s")
 
 # Launch GUI
 if __name__ == "__main__":
