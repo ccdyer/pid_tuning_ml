@@ -7,12 +7,15 @@ from scipy.optimize import differential_evolution
 from dataclasses import dataclass
 import time
 
+### Make timestep changable, to match scan time on PLC PID
+
 # Constants
-points_per_second = 50
+points_per_second = 40
 sim_time = 20
 num_points = int(sim_time * points_per_second)
 t_eval = np.linspace(0, sim_time, num_points)
 timestep = t_eval[1] - t_eval[0]
+t_eval = np.insert(t_eval, 0, 0.0)
 settling_tolerance = 0.005
 
 @dataclass
@@ -30,6 +33,7 @@ class SimulationParams:
     process_gain: float
     dead_time: float
     time_constant: float
+    setpoint: float
 
 # PID Controller Class
 class PID:
@@ -59,24 +63,29 @@ def simulate_system(params: SimulationParams):
     # Call the PID and make sure it's reset at the start
     pid = PID(params.Kp, params.Ki, params.Kd, params.cv_start)
     pid.reset(params.cv_start)
-
-    # Initialize lists for cv/pv/sp histories
-    cv_history = []
-    pv_array = []
-    sp_array = []
+    
+    t_eval = np.linspace(0, sim_time, num_points)
+    timestep = t_eval[1] - t_eval[0] 
     
     # Initialize CV and PV based on setpoints
     pv = np.clip(params.pv_start, params.pv_min, params.pv_max)
+    sp = params.setpoint
+    cv = params.cv_start
+
     # Fill out the cv buffer with the CV init value to avoid starting at zero
     cv_delay_steps = max(1, int(np.round(params.dead_time / timestep)))
     cv_buffer = [params.cv_start] * cv_delay_steps
-    
     disturbance_magnitude = 0.001
     disturbance_time = 5
     disturbance_duration = 3.0
     disturbance_end = disturbance_time + disturbance_duration
     disturbance_value = params.pv_final * disturbance_magnitude
-    sp = params.pv_final
+    
+    # Initialize lists for cv/pv/sp histories
+    pv_array = [pv]
+    cv_history = [cv]
+    sp_array = [sp]
+    
     # Run the actual simulation for x time
     for i, t in enumerate(t_eval):
         # Update the PID every cycle
@@ -147,6 +156,7 @@ class PIDApp(tk.Tk):
         self.max_overshoot_pct = tk.StringVar(value="0.0%")
         self.settling_time = tk.StringVar(value="0.0s")
         self.elapsed_time = tk.StringVar(value="0.0s")
+        self.setpoint = tk.DoubleVar(value=self.pv_final.get())
         
         #Add logic for live updates of necessary values
         self.live_process_gain = tk.StringVar()
@@ -171,15 +181,7 @@ class PIDApp(tk.Tk):
         process = ttk.LabelFrame(self, text="Process")
         process.grid(row=0, column=0, sticky="nwns", padx=5, pady=5)
         process_row = 0
-        ttk.Label(process, text="Control Variable").grid(row=process_row, column=0, stick="e")
-        
-        process_row +=1
-        ttk.Label(process, text="CV Min").grid(row=process_row, column=0, stick="e")
-        ttk.Entry(process, textvariable=self.cv_min).grid(row=process_row, column=1)
-        
-        process_row +=1
-        ttk.Label(process, text="CV Max").grid(row=process_row, column=0, stick="e")
-        ttk.Entry(process, textvariable=self.cv_max).grid(row=process_row, column=1)
+        ttk.Label(process, text="Process Step").grid(row=process_row, column=0, stick="e")
         
         process_row +=1
         ttk.Label(process, text="CV Start").grid(row=process_row, column=0, stick="e")
@@ -190,7 +192,23 @@ class PIDApp(tk.Tk):
         ttk.Entry(process, textvariable=self.cv_final).grid(row=process_row, column=1)
         
         process_row +=1
-        ttk.Label(process, text="Process Variable").grid(row=process_row, column=0, stick="e")
+        ttk.Label(process, text="PV Start").grid(row=process_row, column=0, stick="e")
+        ttk.Entry(process, textvariable=self.pv_start).grid(row=process_row, column=1)
+        
+        process_row +=1
+        ttk.Label(process, text="PV Final").grid(row=process_row, column=0, stick="e")
+        ttk.Entry(process, textvariable=self.pv_final).grid(row=process_row, column=1)
+        
+        process_row +=1
+        ttk.Label(process, text="Process Limits").grid(row=process_row, column=0, stick="e")
+        
+        process_row +=1
+        ttk.Label(process, text="CV Min").grid(row=process_row, column=0, stick="e")
+        ttk.Entry(process, textvariable=self.cv_min).grid(row=process_row, column=1)
+        
+        process_row +=1
+        ttk.Label(process, text="CV Max").grid(row=process_row, column=0, stick="e")
+        ttk.Entry(process, textvariable=self.cv_max).grid(row=process_row, column=1)
         
         process_row +=1
         ttk.Label(process, text="PV Min").grid(row=process_row, column=0, stick="e")
@@ -199,14 +217,6 @@ class PIDApp(tk.Tk):
         process_row +=1
         ttk.Label(process, text="PV Max").grid(row=process_row, column=0, stick="e")
         ttk.Entry(process, textvariable=self.pv_max).grid(row=process_row, column=1)
-        
-        process_row +=1
-        ttk.Label(process, text="PV Start").grid(row=process_row, column=0, stick="e")
-        ttk.Entry(process, textvariable=self.pv_start).grid(row=process_row, column=1)
-        
-        process_row +=1
-        ttk.Label(process, text="PV Final").grid(row=process_row, column=0, stick="e")
-        ttk.Entry(process, textvariable=self.pv_final).grid(row=process_row, column=1)
         
         simulation = ttk.LabelFrame(self, text="Simulation")
         simulation.grid(row=0, column=1, sticky="nwns", padx=5, pady=5)
@@ -254,6 +264,10 @@ class PIDApp(tk.Tk):
         simulation_row += 1
         ttk.Label(simulation, text="Kd:").grid(row=simulation_row, column=0, sticky="e")
         ttk.Entry(simulation, textvariable=self.kd_var).grid(row=simulation_row, column=1)
+        
+        simulation_row += 1
+        ttk.Label(simulation, text="Setpoint:").grid(row=simulation_row, column=0, sticky="e")
+        ttk.Entry(simulation, textvariable=self.setpoint).grid(row=simulation_row, column=1)
         
         simulation_row += 1
         ttk.Button(simulation, text="Manual Simulation", command=self.run_manual).grid(row=simulation_row, column=0, columnspan=2, pady=5)
@@ -363,17 +377,31 @@ class PIDApp(tk.Tk):
             pv_final=self.pv_final.get(),
             process_gain=self.compute_process_gain(),
             dead_time=self.dead_time.get(),
-            time_constant=self.compute_time_constant()
+            time_constant=self.compute_time_constant(),
+            setpoint=self.setpoint.get()
         )
 
     def run_manual(self):
+        starttime = time.time()
         Kp = self.kp_var.get()
         Ki = self.ki_var.get()
         Kd = self.kd_var.get()
         params = self.get_simulation_params(Kp, Ki, Kd)
+        sp = self.setpoint.get()
         pv, sp, cv = simulate_system(params)
         title = "PID Simulation"
         self.update_plot(t_eval, pv, sp, cv, title)
+        sp_val = sp[-1]
+        pv_range = self.pv_max.get() - self.pv_min.get()
+        max_overshoot_val = max(0, (np.max(pv) - sp_val))
+        max_overshoot_pct = (max_overshoot_val / pv_range) * 100
+        settling_time_val = compute_settling_time(pv, t_eval, sp_val)
+        self.max_overshoot.set(f"{max_overshoot_val:.2f}")
+        self.max_overshoot_pct.set(f"{max_overshoot_pct:.2f}%")
+        self.settling_time.set(f"{settling_time_val:.2f}s")
+        endtime = time.time()
+        elapsed_time_val = endtime - starttime
+        self.elapsed_time.set(f"{elapsed_time_val:.2f}s")
 
     def run_optimization(self):
         # Create live plot window
@@ -384,6 +412,7 @@ class PIDApp(tk.Tk):
             
             # Run the system Simulation
             params = self.get_simulation_params(Kp, Ki, Kd)
+            sp = params.pv_final
             pv, sp, cv= simulate_system(params)
             
             # If PV is not a number then reject this solution
@@ -448,11 +477,12 @@ class PIDApp(tk.Tk):
         self.update_plot(t_eval, pv, sp, cv, title)
         self.kp_var.set(round(kp, 3))
         self.ki_var.set(round(ki, 3))
-        self.kd_var.set(round(kd, 3))
+        self.kd_var.set(round(kd, 3)) 
         sp_val = sp[-1]
-        #pv_range = pv_max - pv_min
+        self.setpoint.set(round(sp_val, 3))
+        pv_range = self.pv_max.get() - self.pv_min.get()
         max_overshoot_val = max(0, (np.max(pv) - sp_val))
-        max_overshoot_pct = (max_overshoot_val / sp_val) * 100
+        max_overshoot_pct = (max_overshoot_val / pv_range) * 100
         settling_time_val = compute_settling_time(pv, t_eval, sp_val)
         self.max_overshoot.set(f"{max_overshoot_val:.2f}")
         self.max_overshoot_pct.set(f"{max_overshoot_pct:.2f}%")
