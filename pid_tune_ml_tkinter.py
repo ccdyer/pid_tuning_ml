@@ -10,13 +10,23 @@ import time
 ### Make timestep changable, to match scan time on PLC PID
 
 # Constants
-points_per_second = 40
+settling_tolerance = 0.005
+
+# points_per_second = params.points_per_second
+
+points_per_second = 50
+pps=1/points_per_second
+sec=points_per_second/10
 sim_time = 20
 num_points = int(sim_time * points_per_second)
 t_eval = np.linspace(0, sim_time, num_points)
 timestep = t_eval[1] - t_eval[0]
 t_eval = np.insert(t_eval, 0, 0.0)
-settling_tolerance = 0.005
+t_eval = np.linspace(0, sim_time, num_points)
+timestep = t_eval[1] - t_eval[0]
+print(timestep)
+print(pps)
+print(sec)
 
 @dataclass
 class SimulationParams:
@@ -34,6 +44,7 @@ class SimulationParams:
     dead_time: float
     time_constant: float
     setpoint: float
+    points_per_second: float
 
 # PID Controller Class
 class PID:
@@ -63,9 +74,6 @@ def simulate_system(params: SimulationParams):
     # Call the PID and make sure it's reset at the start
     pid = PID(params.Kp, params.Ki, params.Kd, params.cv_start)
     pid.reset(params.cv_start)
-    
-    t_eval = np.linspace(0, sim_time, num_points)
-    timestep = t_eval[1] - t_eval[0] 
     
     # Initialize CV and PV based on setpoints
     pv = np.clip(params.pv_start, params.pv_min, params.pv_max)
@@ -148,6 +156,7 @@ class PIDApp(tk.Tk):
         self.pv_final = tk.DoubleVar(value=45.0)
         self.dead_time = tk.DoubleVar(value=0.1)
         self.tau = tk.DoubleVar(value=0.75)
+        self.pid_update = tk.DoubleVar(value=20)
         self.sixtythreepctvalue = tk.DoubleVar(value=self.compute_sixtythree_pct_value())
         self.time_constant = tk.DoubleVar(value=self.compute_time_constant())
         self.truncated_time_constant = tk.StringVar(value=str(truncate_float(self.time_constant.get(), 3)))
@@ -243,6 +252,10 @@ class PIDApp(tk.Tk):
         simulation_row += 1
         ttk.Label(simulation, text="Time Constant(τp):").grid(row=simulation_row, column=0, sticky="e")
         ttk.Entry(simulation, textvariable=self.live_time_constant, state="readonly").grid(row=simulation_row, column=1)
+        
+        simulation_row += 1
+        ttk.Label(simulation, text="PID Update Rate(ms):").grid(row=simulation_row, column=0, sticky="e")
+        ttk.Entry(simulation, textvariable=self.pid_update).grid(row=simulation_row, column=1)
 
 #         ttk.Checkbutton(simulation, text="Disturbance", variable=self.disturbance).grid(row=3, column=0, sticky="w")
 #         ttk.Checkbutton(simulation, text="Measurement Noise", variable=self.noise).grid(row=4, column=0, sticky="w")
@@ -355,7 +368,7 @@ class PIDApp(tk.Tk):
         pg = self.compute_process_gain()
         sixtythree = self.compute_sixtythree_pct_value()
         taup = self.compute_time_constant()
-
+        
         self.process_gain.set(pg)
         self.time_constant.set(taup)
 
@@ -378,7 +391,8 @@ class PIDApp(tk.Tk):
             process_gain=self.compute_process_gain(),
             dead_time=self.dead_time.get(),
             time_constant=self.compute_time_constant(),
-            setpoint=self.setpoint.get()
+            setpoint=self.setpoint.get(),
+            points_per_second=1000 / self.pid_update.get(),
         )
 
     def run_manual(self):
@@ -410,8 +424,18 @@ class PIDApp(tk.Tk):
             global trial_counter
             Kp, Ki, Kd = pid_gains
             
-            # Run the system Simulation
             params = self.get_simulation_params(Kp, Ki, Kd)
+            points_per_second = params.points_per_second
+            #points_per_second = 40
+            sim_time = 20
+            num_points = int(sim_time * points_per_second)
+            t_eval = np.linspace(0, sim_time, num_points)
+            timestep = t_eval[1] - t_eval[0]
+            t_eval = np.insert(t_eval, 0, 0.0)
+            t_eval = np.linspace(0, sim_time, num_points)
+            timestep = t_eval[1] - t_eval[0]
+            
+            # Run the system Simulation
             sp = params.pv_final
             pv, sp, cv= simulate_system(params)
             
@@ -428,15 +452,15 @@ class PIDApp(tk.Tk):
             # Weighting Calculations
             # Integrated Squared Error Calc
             # This is mainly used to avoid scenarios where the pv never reaches the setpoint
-            ise = np.sum(np.square(error)) * timestep
+            ise = np.sum(np.square(error)) * params.timestep
             
             # Overshoot Penalty Penalty calculation
             overshoot = np.maximum(0, pv - sp)
-            overshoot_penalty = np.sum(np.square(overshoot)) * timestep
+            overshoot_penalty = np.sum(np.square(overshoot)) * params.timestep
             
             # Large initial PV change penalty
             # Penalize large PV step changes
-            initial_window = int(1 / timestep)
+            initial_window = int(1 / params.timestep)
             initial_pv = pv[0]
             transient_deviation = np.abs(pv[:initial_window] - initial_pv)
             initial_instability_penalty = np.sum(transient_deviation)
