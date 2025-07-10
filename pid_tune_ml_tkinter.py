@@ -13,20 +13,17 @@ import time
 settling_tolerance = 0.005
 
 # points_per_second = params.points_per_second
-
-points_per_second = 50
-pps=1/points_per_second
-sec=points_per_second/10
-sim_time = 20
-num_points = int(sim_time * points_per_second)
-t_eval = np.linspace(0, sim_time, num_points)
-timestep = t_eval[1] - t_eval[0]
-t_eval = np.insert(t_eval, 0, 0.0)
-t_eval = np.linspace(0, sim_time, num_points)
-timestep = t_eval[1] - t_eval[0]
-print(timestep)
-print(pps)
-print(sec)
+# update_rate = 20
+# points_per_second = 50
+# pps=1/points_per_second
+# sec=points_per_second/1000
+# sim_time = 20
+# num_points = int(sim_time * points_per_second)
+# t_eval = np.linspace(0, sim_time, num_points)
+# timestep = t_eval[1] - t_eval[0]
+# t_eval = np.insert(t_eval, 0, 0.0)
+# t_eval = np.linspace(0, sim_time, num_points)
+# timestep = t_eval[1] - t_eval[0]
 
 @dataclass
 class SimulationParams:
@@ -44,7 +41,7 @@ class SimulationParams:
     dead_time: float
     time_constant: float
     setpoint: float
-    points_per_second: float
+    timestep: float
 
 # PID Controller Class
 class PID:
@@ -79,9 +76,17 @@ def simulate_system(params: SimulationParams):
     pv = np.clip(params.pv_start, params.pv_min, params.pv_max)
     sp = params.setpoint
     cv = params.cv_start
+    
+    points_per_second = 1 / params.timestep
+    #points_per_second = 40
+    sim_time = 20
+    num_points = int(sim_time * points_per_second)
+    t_eval = np.linspace(0, sim_time, num_points)
+#     t_eval = np.insert(t_eval, 0, 0.0)
+    #t_eval = np.arange(0, sim_time+params.timestep, params.timestep)
 
     # Fill out the cv buffer with the CV init value to avoid starting at zero
-    cv_delay_steps = max(1, int(np.round(params.dead_time / timestep)))
+    cv_delay_steps = max(1, int(np.round(params.dead_time / params.timestep)))
     cv_buffer = [params.cv_start] * cv_delay_steps
     disturbance_magnitude = 0.001
     disturbance_time = 5
@@ -95,23 +100,23 @@ def simulate_system(params: SimulationParams):
     sp_array = [sp]
     
     # Run the actual simulation for x time
-    for i, t in enumerate(t_eval):
+    for i, t in enumerate(t_eval[1:]):
         # Update the PID every cycle
         error = sp - pv
-        cv, integral = pid.update(error, timestep, params.cv_min, params.cv_max)
+        cv, integral = pid.update(error, params.timestep, params.cv_min, params.cv_max)
         
         cv_buffer.append(cv)
         delayed_cv = cv_buffer.pop(0)
         # Update the PID simulation
         dpv = (-pv + params.process_gain * delayed_cv) / params.time_constant
-        pv += dpv * timestep
+        pv += dpv * params.timestep
         pv = np.clip(pv, params.pv_min, params.pv_max)
         
         # Add the PV, cv and SP to arrays for plotting
         pv_array.append(pv)
         cv_history.append(cv)
         sp_array.append(sp)
-    return np.array(pv_array), np.array(sp_array), np.array(cv_history)
+    return np.array(pv_array), np.array(sp_array), np.array(cv_history), np.array(t_eval)
 
 # Compute Settling Time
 def compute_settling_time(pv, t, pv_final, tolerance=settling_tolerance):
@@ -142,7 +147,7 @@ class PIDApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("PID Simulation with Optimization")
-        self.geometry("1500x600")
+        self.geometry("1215x600")
         self.kp_var = tk.DoubleVar(value=0.185)
         self.ki_var = tk.DoubleVar(value=0.7)
         self.kd_var = tk.DoubleVar(value=0.0)
@@ -304,7 +309,7 @@ class PIDApp(tk.Tk):
         instruction = ttk.LabelFrame(self, text="Instructions")
         instruction.grid(row=1, column=0, columnspan=2, sticky="nwew", padx=5, pady=5)
         
-        ttk.Label(instruction, text="1. Make a step change in your CV.  This change should be in the normal operating range of your process, and should be large enough to see a noticable(>10% of full range) change in your PV").grid(row=0, column=0, stick="e")
+        #ttk.Label(instruction, text="1. Make a step change in your CV.  This change should be in the normal operating range of your process, and should be large enough to see a noticable(>10% of full range) change in your PV").grid(row=0, column=0, stick="e")
 
         self.plot_frame = ttk.LabelFrame(self, text="Live Plot")
         self.plot_frame.grid(row=0, column=2, sticky="nsew", padx=5, pady=5)
@@ -392,7 +397,7 @@ class PIDApp(tk.Tk):
             dead_time=self.dead_time.get(),
             time_constant=self.compute_time_constant(),
             setpoint=self.setpoint.get(),
-            points_per_second=1000 / self.pid_update.get(),
+            timestep=(1 / (1000 / self.pid_update.get())),
         )
 
     def run_manual(self):
@@ -402,7 +407,7 @@ class PIDApp(tk.Tk):
         Kd = self.kd_var.get()
         params = self.get_simulation_params(Kp, Ki, Kd)
         sp = self.setpoint.get()
-        pv, sp, cv = simulate_system(params)
+        pv, sp, cv, t_eval = simulate_system(params)
         title = "PID Simulation"
         self.update_plot(t_eval, pv, sp, cv, title)
         sp_val = sp[-1]
@@ -425,19 +430,12 @@ class PIDApp(tk.Tk):
             Kp, Ki, Kd = pid_gains
             
             params = self.get_simulation_params(Kp, Ki, Kd)
-            points_per_second = params.points_per_second
-            #points_per_second = 40
-            sim_time = 20
-            num_points = int(sim_time * points_per_second)
-            t_eval = np.linspace(0, sim_time, num_points)
-            timestep = t_eval[1] - t_eval[0]
-            t_eval = np.insert(t_eval, 0, 0.0)
-            t_eval = np.linspace(0, sim_time, num_points)
-            timestep = t_eval[1] - t_eval[0]
+            #t_eval = np.linspace(0, sim_time, num_points)
+            #timestep = t_eval[1] - t_eval[0]
             
             # Run the system Simulation
             sp = params.pv_final
-            pv, sp, cv= simulate_system(params)
+            pv, sp, cv, t_eval= simulate_system(params)
             
             # If PV is not a number then reject this solution
             if np.any(np.isnan(pv)) or np.any(np.isinf(pv)):
@@ -496,7 +494,7 @@ class PIDApp(tk.Tk):
         # Final result
         kp, ki, kd = result.x
         params = self.get_simulation_params(kp, ki, kd)
-        pv, sp, cv= simulate_system(params)
+        pv, sp, cv, t_eval= simulate_system(params)
         title = (f"Final PID Optimization | Kp:{kp:.3f}, Ki:{ki:.3f}, Kd:{kd:.3f}, Trials:{trial_counter}")
         self.update_plot(t_eval, pv, sp, cv, title)
         self.kp_var.set(round(kp, 3))
